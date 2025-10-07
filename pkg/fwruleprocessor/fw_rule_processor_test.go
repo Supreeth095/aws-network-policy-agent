@@ -4,10 +4,12 @@ import (
 	"net"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-network-policy-agent/api/v1alpha1"
 	"github.com/aws/aws-network-policy-agent/pkg/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -519,4 +521,76 @@ func TestFWRuleProcessor_SortFirewallRulesByPrefixLengthWithL4Info(t *testing.T)
 			assert.Equal(t, tt.expectedOutput, inputCopy, "Sorted rules do not match expected output")
 		})
 	}
+}
+
+func TestSelectWinningRuleByPrecedence(t *testing.T) {
+	rules := []EbpfFirewallRules{
+		{
+			IPCidr:          "10.0.0.0/24",
+			PolicyName:      "policy-low",
+			PolicyNamespace: "default",
+			Precedence:      10,
+		},
+		{
+			IPCidr:          "10.0.0.0/24",
+			PolicyName:      "policy-high",
+			PolicyNamespace: "default",
+			Precedence:      20,
+		},
+	}
+
+	f := NewFirewallRuleProcessor("10.1.1.1", "/32", false)
+	winner := f.selectWinningRule(rules)
+
+	require.Equal(t, "policy-high", winner.PolicyName)
+}
+
+func TestSelectWinningRuleByPolicyName(t *testing.T) {
+	rules := []EbpfFirewallRules{
+		{
+			IPCidr:          "10.0.0.0/24",
+			PolicyName:      "policy-b",
+			PolicyNamespace: "default",
+			Precedence:      10,
+		},
+		{
+			IPCidr:          "10.0.0.0/24",
+			PolicyName:      "policy-a",
+			PolicyNamespace: "default",
+			Precedence:      10,
+		},
+	}
+
+	f := NewFirewallRuleProcessor("10.1.1.1", "/32", false)
+	winner := f.selectWinningRule(rules)
+
+	require.Equal(t, "policy-a", winner.PolicyName)
+}
+
+func TestComputeMapEntriesReturnsPolicyMetadata(t *testing.T) {
+	f := NewFirewallRuleProcessor("10.1.1.1", "/32", false)
+
+	rules := []EbpfFirewallRules{
+		{
+			IPCidr:          "10.0.0.0/24",
+			PolicyName:      "policy-1",
+			PolicyNamespace: "ns-a",
+			PolicyID:        123,
+			Precedence:      100,
+			L4Info: []v1alpha1.Port{
+				{Port: utils.Ptr[int32](80), Protocol: utils.Ptr(corev1.ProtocolTCP)},
+			},
+		},
+	}
+
+	mapEntries, metadata, err := f.ComputeMapEntriesFromEndpointRules(rules)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, mapEntries)
+	require.Contains(t, metadata, uint32(123))
+	info := metadata[123]
+	require.Equal(t, "policy-1", info.Name)
+	require.Equal(t, "ns-a", info.Namespace)
+	require.Equal(t, utils.PolicyTypeBoth, info.PolicyType)
+	require.InDelta(t, time.Now().Unix(), info.CreationTimestamp, 5)
 }

@@ -17,6 +17,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// Ptr returns a pointer to the provided value.
+func Ptr[T any](v T) *T {
+	return &v
+}
+
 var (
 	TCP_PROTOCOL_NUMBER             = 6
 	UDP_PROTOCOL_NUMBER             = 17
@@ -42,6 +47,7 @@ var (
 	ErrFileExists                        = "file exists"
 	ErrInvalidFilterList                 = "failed to get filter list"
 	ErrMissingFilter                     = "no active filter to detach"
+	ErrProcessNotRunning                 = fmt.Errorf("process no longer running")
 )
 
 func log() logger.Logger {
